@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using HtmlAgilityPack;
+using System.Text;
 
 class GithubDL
 {
@@ -11,48 +12,46 @@ class GithubDL
     private class RowItem
     {
         public RowItemType Type { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Url { get; set; } = string.Empty;
-        public string LastCommitInfo { get; set; } = string.Empty;
-        public string LastCommitDate { get; set; } = string.Empty;
-
+        public string Name { get; set; } = String.Empty;
+        public string Url { get; set; } = String.Empty;
+        public string LastCommitInfo { get; set; } = String.Empty;
+        public string LastCommitDate { get; set; } = String.Empty;
     }
 
-    private static List<RowItem> RowItemList = new List<RowItem>();
+
     private static HttpClient MyClient = new();
     private static byte WhatToDOMask = 0;
+    private static readonly HttpClient Client = new();
+    private static string MainUrl = string.Empty;
+    private static string RootOutPath = ".";
 
     public static void Main(string[] args)
     {
-        string url = DealWithArgs(args);
-        byte option = (byte)(WhatToDOMask & 0xFF);
-        switch (option)
+        List<RowItem> rowItemList = new();
+
+        MainUrl = DealWithArgs(args);
+        if (MainUrl != "")
         {
-            case 0x00:
-                RequestFileList(url);
-                ListWithoutDetails(RowItemList);
-                break;
+            RequestFileList(MainUrl, rowItemList);
+            List(rowItemList);
+            GetRequiedFiles(rowItemList);
 
-            case 0x01:
-                RequestFileList(url);
-                ListWithDetails(RowItemList);
-                break;
-
-            default:
-                break;
         }
-
-
     }
 
     static private string DealWithArgs(string[] args)
     {
         string url = String.Empty;
-        foreach (var arg in args)
+        for(int i=0;i<args.Length; i++)
         {
+            var arg = args[i];
             if (arg[0] != '-')
             {
-                if (arg.Contains("github.com")) url = arg;
+                if (arg.Contains("github.com")) url = Uri.UnescapeDataString(arg);
+                else if(arg.Contains('\\') || arg.Contains('/') || arg.Contains(':'))
+                {
+                    RootOutPath = arg;
+                }
                 else
                 {
                     Console.WriteLine("-h for manual");
@@ -61,14 +60,22 @@ class GithubDL
             }
             else
             {
-                for(var i = 1; i < arg.Length; i++)
+                for (var j = 1; j < arg.Length; j++)
                 {
-                    if (arg[i].Equals('l')) WhatToDOMask |= 0x1;
-                    else if(arg[i].Equals('d')) WhatToDOMask |= 0x10;
-                    else
+                    switch (arg[j])
                     {
-                        Console.WriteLine("-h for manual");
-                        return url;
+                    case 'l':
+                        WhatToDOMask |= 0x0F;
+                        break;
+                    case 'd':
+                        WhatToDOMask |= 0xF0;
+                        break;
+                    case 'o':
+                        RootOutPath = args[i+1];
+                        break;
+                    case 'h':
+                        PrintHelpInfo();
+                        return "";
                     }
                 }
             }
@@ -76,67 +83,53 @@ class GithubDL
         return url;
     }
 
-    static private void RequestFileList(string url)
+    static private void PrintHelpInfo()
+    {
+        Console.WriteLine(@"\ngithub-dl.exe [OPTION]... [URL]...\n\n  -l\t
+            list files with details\n\n  -d\tdownload all files in current path directly\n\n  -o\toutput path");
+    }
+
+    static private void RequestFileList(string url, List<RowItem> list)
     {
         try
         {
-            //string path = @"E:\Code\C#\github-dl\tt.txt";
-            //FileStream fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite);
-            //StreamReader sr = new StreamReader(fs);
-            //string ret = sr.ReadToEnd();
+            var htmlWeb = new HtmlWeb();
+            var htmlDoc = htmlWeb.Load(url);
 
-            HttpResponseMessage response = MyClient.GetAsync(url).Result;
-            response.EnsureSuccessStatusCode();
-            string ret = response.Content.ReadAsStringAsync().Result;
+            HtmlNodeCollection gridChildren = htmlDoc.DocumentNode
+                .SelectNodes("//div[@class='js-details-container Details']/div[@role='grid']/div[contains(@class, 'py-2')]");
 
-            string contentPattern = "<div role=\"grid\"[\\s\\S]*<readme-toc>";
-            string typePattern = "<svg aria-label=\"(.*?)\"";
-            string headerPattern = "<div role=\"rowheader\"[\\s\\S]*?</div>";
-            string cellPattern = "<div role=\"gridcell\"[\\s\\S]*?</div>";
-            string urlPattern = "href=\"(.*?)\"";
-            string innerPattern = ">(.*?)<";
-
-            Match content = Regex.Match(ret, contentPattern);
-            MatchCollection headers = Regex.Matches(content.Value, headerPattern);
-            foreach (Match header in headers)
+            int cnt = gridChildren.Count;
+            foreach (var grid in gridChildren)
             {
-                RowItem item = new RowItem();
+                RowItem item = new();
 
-                Match href = Regex.Match(header.Value, urlPattern);
-                item.Url = href.Groups[1].Value;
+                HtmlNode header = grid.SelectSingleNode(".//div[@role='rowheader']/span/a");
+                item.Name = header.InnerText;
+                item.Url = header.GetAttributeValue("href", "not find");
 
-                MatchCollection name = Regex.Matches(header.Value, innerPattern);
-                foreach (Match n in name)
+                HtmlNodeCollection cells = grid.SelectNodes(".//div[@role='gridcell']");
+
+                var svg = cells[0].SelectSingleNode(".//svg");
+                var type = svg.GetAttributeValue("aria-label", "not find");
+                if (type.Contains("Directory"))
                 {
-                    item.Name += n.Groups[1].Value;
+                    item.Type = RowItemType.Directory;
+                    item.Name += "/";
                 }
-                RowItemList.Add(item);
+                else item.Type = RowItemType.File;
+
+
+                var commitMsg = cells[1].SelectSingleNode(".//span/a");
+                if (commitMsg != null) item.LastCommitInfo = commitMsg.GetAttributeValue("title", "not find").Split('\n')[0];
+
+                var time = cells[2].SelectSingleNode(".//time-ago");
+                string t = cells[2].InnerText.Trim();
+                if (t.Length < 12) t = t.Insert(4, " ");
+                if (time != null) item.LastCommitDate = t;
+
+                list.Add(item);
             }
-
-            MatchCollection cells = Regex.Matches(content.Value, cellPattern);
-            int index = 0;
-            for (var i = 0; i < cells.Count; i += 3)
-            {
-                Match type = Regex.Match(cells[i].Value, typePattern);
-                if (type.Groups[1].Value.Equals("Directory")) RowItemList[index].Type = RowItemType.Directory;
-                else if (type.Groups[1].Value.Equals("File")) RowItemList[index].Type = RowItemType.File;
-
-                MatchCollection commitInfos = Regex.Matches(cells[i + 1].Value, innerPattern);
-                foreach (Match m in commitInfos)
-                {
-                    RowItemList[index].LastCommitInfo += m.Groups[1].Value;
-                }
-
-                MatchCollection commitDates = Regex.Matches(cells[i + 2].Value, innerPattern);
-                foreach (Match m in commitDates)
-                {
-                    RowItemList[index].LastCommitDate += m.Groups[1].Value;
-                }
-
-                index++;
-            }
-
-            //fs.Close();
         }
         catch (Exception e)
         {
@@ -144,31 +137,146 @@ class GithubDL
         }
     }
 
-    static private void ListWithDetails(List<RowItem> itemList)
+    static void GetRequiedFiles(List<RowItem> list)
     {
-        int cnt = 0;
-        bool align = itemList.Count > 9 ? true : false;
-        foreach (RowItem item in itemList)
+        try
         {
-            string name = item.Name;
-            if (item.Type == RowItemType.Directory) name += "/";
-            if(align) Console.WriteLine($"[{cnt,2}]  {name}\t{item.LastCommitDate}\n\t{item.LastCommitInfo}\t{item.Url}");
-            else Console.WriteLine($"[{cnt}]  {name}\t{item.LastCommitDate}\n\t{item.LastCommitInfo}\t{item.Url}");
-            cnt++;
+            string input;
+            if ((WhatToDOMask & 0xF0) == 0xF0)
+            {
+                list.ForEach(i => Download(i));
+                return;
+            }
+            else input = Console.ReadLine();
+
+            var indexAndPath = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            List<int> fileIndices = new();
+
+            foreach (string str in indexAndPath)
+            {
+                if (str.Contains('/') || str.Contains('\\') || str.Contains(':'))
+                {
+                    RootOutPath = str;
+                }
+                else
+                {
+                    fileIndices.Add(Convert.ToInt32(str));
+                }
+            }
+            fileIndices.ForEach(i => Download(list[i]));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Get requied files error: {e.Message}");
         }
     }
 
-    static private void ListWithoutDetails(List<RowItem> itemList)
+    static void Download(RowItem item)
     {
-        int cnt = 0;
-        bool align = itemList.Count>9 ? true : false;
+        if (item.Type == RowItemType.File)
+        {
+            DownloadAndSaveFile(item);
+        }
+        else if (item.Type == RowItemType.Directory)
+        {
+            DownloadAndSaveDirectory(item);
+        }
+    }
+
+    static void DownloadAndSaveFile(RowItem item)
+    {
+        var rawUrl = "https://raw.githubusercontent.com" + item.Url.Replace("/blob/", "/");
+        var filePath = GetFilePath(rawUrl);
+        SaveFile(DownloadFile(rawUrl), filePath);
+    }
+
+    private static string GetFilePath(string rawFileUrl)
+    {
+        var rootName = $"/{MainUrl.Split('/').Last()}/";
+        return $"{RootOutPath}{rawFileUrl[rawFileUrl.IndexOf(rootName)..]}";
+    }
+
+    static void DownloadAndSaveDirectory(RowItem item)
+    {
+        var dirUrl = "https://github.com" + item.Url;
+        List<RowItem> list = new List<RowItem>();
+        RequestFileList(dirUrl, list);
+        foreach (RowItem i in list)
+        {
+            Download(i);
+        }
+    }
+
+    static string DownloadFile(string url)
+    {
+        try
+        {
+            return Client.GetStringAsync(url).Result;
+        }
+        catch (HttpRequestException e)
+        {
+            Console.WriteLine($"Download file error: {e.Message}");
+            return null;
+        }
+    }
+
+    static void SaveFile(string content, string path)
+    {
+        try
+        {
+            var dirPath = Path.GetDirectoryName(path);
+            if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
+
+            FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write);
+            fs.Seek(0, SeekOrigin.Begin);
+            fs.Write(System.Text.Encoding.Default.GetBytes(content), 0, content.Length);
+            fs.Close();
+            Console.WriteLine($"Save File: \"{path}\" done.");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Save file error: {e.Message}");
+        }
+    }
+
+    static private int GetLongestNameLength(List<RowItem> itemList)
+    {
+        int lenth = 0;
+        foreach (var i in itemList)
+        {
+            if (lenth < i.Name.Length) lenth = i.Name.Length;
+        }
+        return lenth;
+    }
+
+    static void List(List<RowItem> itemList)
+    {
+        bool withDetails = ((WhatToDOMask & 0x0F) == 0x0F) ? true : false;
+
+        int index = 0;
+        int indexPadding = itemList.Count.ToString().Length;
+        int namePadding = GetLongestNameLength(itemList);
+
+        StringBuilder sb = new();
+        sb.Append("\n\t");
+        sb.AppendLine(MainUrl);
+        sb.AppendLine();
         foreach (RowItem item in itemList)
         {
-            string name = item.Name;
-            if (item.Type == RowItemType.Directory) name += "/";
-            if(align) Console.WriteLine($"[{cnt,2}]  {name}");
-            else Console.WriteLine($"[{cnt}]  {name}");
-            cnt++;
+            sb.Append('[');
+            sb.Append($"{index}".PadLeft(indexPadding, ' '));
+            sb.Append($"]  {item.Name}".PadRight(namePadding + 3, ' '));
+            if (withDetails)
+            {
+                sb.Append($"  {item.LastCommitDate}".PadRight(14, ' ')); // "Nov 24, 2021".length + 2 spaces = 14
+                sb.Append($"  {item.LastCommitInfo}");
+            }
+            sb.AppendLine();
+            index++;
         }
+        if((WhatToDOMask & 0xF0) != 0xF0)
+            sb.AppendLine("\nInput the file indices and saving path to download:");
+
+        Console.WriteLine(sb.ToString());
     }
 }
