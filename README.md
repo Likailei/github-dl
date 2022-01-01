@@ -17,3 +17,6 @@ Save File: "e:/example/github-dl/main/github-dl.sln" done.
 - [Html Agility Pack]
 
 [Html Agility Pack]: https://html-agility-pack.net/
+
+# TODO
+- parse commit message and commit date can't succeed 100%
