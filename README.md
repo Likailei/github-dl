@@ -1,7 +1,7 @@
 # github-dl
 download repository files in terminal
 # usage
-execute: `./github-dl.exe github.com/example/folder -l`
+execute: `./github-dl.exe github.com/Likailei/github-dl -l`
 >    https://github.com/Likailei/github-dl  
 >  
 > [0]  Program.cs  

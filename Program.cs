@@ -18,8 +18,6 @@ class GithubDL
         public string LastCommitDate { get; set; } = String.Empty;
     }
 
-
-    private static HttpClient MyClient = new();
     private static byte WhatToDOMask = 0;
     private static readonly HttpClient Client = new();
     private static string MainUrl = string.Empty;
