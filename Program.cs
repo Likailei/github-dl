@@ -27,16 +27,18 @@ class GithubDL
 
     public static void Main(string[] args)
     {
-        List<RowItem> rowItemList = new();
-
         MainUrl = DealWithArgs(args);
+
+        List<RowItem> rowItemList = new();
         if (MainUrl != "")
         {
             RequestFileList(MainUrl, rowItemList);
             List(rowItemList);
             GetRequiedFiles(rowItemList);
-
         }
+
+        var key = Console.ReadKey();
+        if (key.KeyChar.Equals('q')) return;
     }
 
     static private string DealWithArgs(string[] args)
@@ -175,7 +177,7 @@ class GithubDL
     {
         if (item.Type == RowItemType.File)
         {
-            DownloadAndSaveFile(item);
+            DownloadAndSaveFileAsync(item);
         }
         else if (item.Type == RowItemType.Directory)
         {
@@ -183,11 +185,15 @@ class GithubDL
         }
     }
 
-    static void DownloadAndSaveFile(RowItem item)
+    static async void DownloadAndSaveFileAsync(RowItem item)
     {
         var rawUrl = "https://raw.githubusercontent.com" + item.Url.Replace("/blob/", "/");
         var filePath = GetFilePath(rawUrl);
-        SaveFile(DownloadFile(rawUrl), filePath);
+        var str = await DownloadFileAsync(rawUrl);
+        if(str?.Length != 0)
+        {
+            SaveFile(str, filePath);
+        }
     }
 
     private static string GetFilePath(string rawFileUrl)
@@ -207,11 +213,11 @@ class GithubDL
         }
     }
 
-    static string DownloadFile(string url)
+    static async Task<string> DownloadFileAsync(string url)
     {
         try
         {
-            return Client.GetStringAsync(url).Result;
+            return await Client.GetStringAsync(url);
         }
         catch (HttpRequestException e)
         {
@@ -231,7 +237,7 @@ class GithubDL
             fs.Seek(0, SeekOrigin.Begin);
             fs.Write(System.Text.Encoding.Default.GetBytes(content), 0, content.Length);
             fs.Close();
-            Console.WriteLine($"Save File: \"{path}\" done.");
+            Console.WriteLine($"Save file: \"{path}\" done.");
         }
         catch (Exception e)
         {
