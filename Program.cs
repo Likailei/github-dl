@@ -22,6 +22,7 @@ class GithubDL
     static readonly HttpClient Client = new();
     static string RepositoryUrl = string.Empty;
     static string OutputPath = ".";
+    static List<Task> Tasks = new List<Task>();
 
     public static void Main(string[] args)
     {
@@ -33,10 +34,12 @@ class GithubDL
             RequestFileList(RepositoryUrl, rowItemList);
             ListDirectory(rowItemList);
             GetRequiedFiles(rowItemList);
+            Task.WaitAll(Tasks.ToArray());
         }
-
-        var key = Console.ReadKey();
-        if (key.KeyChar.Equals('q')) return;
+        else
+        {
+            PrintHelpInfo();
+        }
     }
 
     static string ArgsParser(string[] args)
@@ -178,7 +181,7 @@ class GithubDL
             }
             else input = Console.ReadLine();
 
-            var indexAndPath = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var indexAndPath = input.Replace('\\', '/').Split(' ', StringSplitOptions.RemoveEmptyEntries);
             List<int> fileIndices = new();
 
             foreach (string str in indexAndPath)
@@ -204,7 +207,7 @@ class GithubDL
     {
         if (item.Type == RowItemType.File)
         {
-            DownloadAndSaveFileAsync(item);
+            Tasks.Add(DownloadAndSaveFileAsync(item));
         }
         else if (item.Type == RowItemType.Directory)
         {
@@ -212,7 +215,7 @@ class GithubDL
         }
     }
 
-    static async void DownloadAndSaveFileAsync(RowItem item)
+    static async Task DownloadAndSaveFileAsync(RowItem item)
     {
         var rawUrl = "https://raw.githubusercontent.com" + item.Url.Replace("/blob/", "/");
         var filePath = GetFilePath(rawUrl);
