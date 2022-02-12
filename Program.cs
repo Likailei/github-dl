@@ -9,7 +9,7 @@ class GithubDL
         File
     }
 
-    private class RowItem
+    class RowItem
     {
         public RowItemType Type { get; set; }
         public string Name { get; set; } = String.Empty;
@@ -18,20 +18,20 @@ class GithubDL
         public string LastCommitDate { get; set; } = String.Empty;
     }
 
-    private static byte WhatToDOMask = 0;
-    private static readonly HttpClient Client = new();
-    private static string MainUrl = string.Empty;
-    private static string RootOutPath = ".";
+    static byte WhatToDoMask = 0;
+    static readonly HttpClient Client = new();
+    static string RepositoryUrl = string.Empty;
+    static string OutputPath = ".";
 
     public static void Main(string[] args)
     {
-        MainUrl = DealWithArgs(args);
+        RepositoryUrl = ArgsParser(args);
 
         List<RowItem> rowItemList = new();
-        if (MainUrl != "")
+        if (RepositoryUrl != "")
         {
-            RequestFileList(MainUrl, rowItemList);
-            List(rowItemList);
+            RequestFileList(RepositoryUrl, rowItemList);
+            ListDirectory(rowItemList);
             GetRequiedFiles(rowItemList);
         }
 
@@ -39,7 +39,7 @@ class GithubDL
         if (key.KeyChar.Equals('q')) return;
     }
 
-    static private string DealWithArgs(string[] args)
+    static string ArgsParser(string[] args)
     {
         string url = String.Empty;
         for(int i=0;i<args.Length; i++)
@@ -50,12 +50,11 @@ class GithubDL
                 if (arg.Contains("github.com")) url = Uri.UnescapeDataString(arg);
                 else if(arg.Contains('\\') || arg.Contains('/') || arg.Contains(':'))
                 {
-                    RootOutPath = arg;
+                    OutputPath = arg.Replace('\\', '/');
                 }
                 else
                 {
-                    Console.WriteLine("-h for manual");
-                    return url;
+                    Console.WriteLine("-h for usage");
                 }
             }
             else
@@ -65,13 +64,13 @@ class GithubDL
                     switch (arg[j])
                     {
                     case 'l':
-                        WhatToDOMask |= 0x0F;
+                        WhatToDoMask |= 0x0F;
                         break;
                     case 'd':
-                        WhatToDOMask |= 0xF0;
+                        WhatToDoMask |= 0xF0;
                         break;
                     case 'o':
-                        RootOutPath = args[i+1];
+                        OutputPath = args[i+1];
                         break;
                     case 'h':
                         PrintHelpInfo();
@@ -83,13 +82,12 @@ class GithubDL
         return url;
     }
 
-    static private void PrintHelpInfo()
+    static void PrintHelpInfo()
     {
-        Console.WriteLine(@"\ngithub-dl.exe [OPTION]... [URL]...\n\n  -l\t
-            list files with details\n\n  -d\tdownload all files in current path directly\n\n  -o\toutput path");
+        Console.WriteLine("\ngithub-dl.exe [OPTION] [URL]\n\n -l  list files with details\n -d  download all files in current path directly\n -o  output path");
     }
 
-    static private void RequestFileList(string url, List<RowItem> list)
+    static void RequestFileList(string url, List<RowItem> list)
     {
         try
         {
@@ -137,12 +135,43 @@ class GithubDL
         }
     }
 
+    static void ListDirectory(List<RowItem> itemList)
+    {
+        bool withDetails = ((WhatToDoMask & 0x0F) == 0x0F) ? true : false;
+
+        int index = 0;
+        int indexPadding = itemList.Count.ToString().Length;
+        int namePadding = GetLongestNameLength(itemList);
+
+        StringBuilder sb = new();
+        sb.Append("\n\t");
+        sb.AppendLine(RepositoryUrl);
+        sb.AppendLine();
+        foreach (RowItem item in itemList)
+        {
+            sb.Append('[');
+            sb.Append($"{index}".PadLeft(indexPadding, ' '));
+            sb.Append($"]  {item.Name}".PadRight(namePadding + 3, ' '));
+            if (withDetails)
+            {
+                sb.Append($"  {item.LastCommitDate}".PadRight(14, ' ')); // "Nov 24, 2021".length + 2 spaces = 14
+                sb.Append($"  {item.LastCommitInfo}");
+            }
+            sb.AppendLine();
+            index++;
+        }
+        if ((WhatToDoMask & 0xF0) != 0xF0)
+            sb.AppendLine("\nInput the file indices and saving path to download:");
+
+        Console.WriteLine(sb.ToString());
+    }
+
     static void GetRequiedFiles(List<RowItem> list)
     {
         try
         {
             string input;
-            if ((WhatToDOMask & 0xF0) == 0xF0)
+            if ((WhatToDoMask & 0xF0) == 0xF0) // Download all files directly
             {
                 list.ForEach(i => Download(i));
                 return;
@@ -156,7 +185,7 @@ class GithubDL
             {
                 if (str.Contains('/') || str.Contains('\\') || str.Contains(':'))
                 {
-                    RootOutPath = str;
+                    OutputPath = str;
                 }
                 else
                 {
@@ -194,10 +223,10 @@ class GithubDL
         }
     }
 
-    private static string GetFilePath(string rawFileUrl)
+    static string GetFilePath(string rawFileUrl)
     {
-        var rootName = $"/{MainUrl.Split('/').Last()}/";
-        return $"{RootOutPath}{rawFileUrl[rawFileUrl.IndexOf(rootName)..]}";
+        var rootName = $"/{RepositoryUrl.Split('/').Last()}/";
+        return $"{OutputPath}{rawFileUrl[rawFileUrl.IndexOf(rootName)..]}";
     }
 
     static void DownloadAndSaveDirectory(RowItem item)
@@ -235,7 +264,7 @@ class GithubDL
             fs.Seek(0, SeekOrigin.Begin);
             fs.Write(System.Text.Encoding.Default.GetBytes(content), 0, content.Length);
             fs.Close();
-            Console.WriteLine($"Save file: \"{path}\" done.");
+            Console.WriteLine($"File: \"{path}\" saved.");
         }
         catch (Exception e)
         {
@@ -243,44 +272,13 @@ class GithubDL
         }
     }
 
-    static private int GetLongestNameLength(List<RowItem> itemList)
+    static int GetLongestNameLength(List<RowItem> itemList)
     {
-        int lenth = 0;
+        int length = 0;
         foreach (var i in itemList)
         {
-            if (lenth < i.Name.Length) lenth = i.Name.Length;
+            if (length < i.Name.Length) length = i.Name.Length;
         }
-        return lenth;
-    }
-
-    static void List(List<RowItem> itemList)
-    {
-        bool withDetails = ((WhatToDOMask & 0x0F) == 0x0F) ? true : false;
-
-        int index = 0;
-        int indexPadding = itemList.Count.ToString().Length;
-        int namePadding = GetLongestNameLength(itemList);
-
-        StringBuilder sb = new();
-        sb.Append("\n\t");
-        sb.AppendLine(MainUrl);
-        sb.AppendLine();
-        foreach (RowItem item in itemList)
-        {
-            sb.Append('[');
-            sb.Append($"{index}".PadLeft(indexPadding, ' '));
-            sb.Append($"]  {item.Name}".PadRight(namePadding + 3, ' '));
-            if (withDetails)
-            {
-                sb.Append($"  {item.LastCommitDate}".PadRight(14, ' ')); // "Nov 24, 2021".length + 2 spaces = 14
-                sb.Append($"  {item.LastCommitInfo}");
-            }
-            sb.AppendLine();
-            index++;
-        }
-        if((WhatToDOMask & 0xF0) != 0xF0)
-            sb.AppendLine("\nInput the file indices and saving path to download:");
-
-        Console.WriteLine(sb.ToString());
+        return length;
     }
 }
