@@ -1,5 +1,6 @@
 ﻿using HtmlAgilityPack;
 using System.Text;
+using System.Web;
 
 class GithubDL
 {
@@ -22,7 +23,7 @@ class GithubDL
     static readonly HttpClient Client = new();
     static string RepositoryUrl = string.Empty;
     static string OutputPath = ".";
-    static List<Task> Tasks = new List<Task>();
+    static List<Task> Tasks = new();
 
     public static void Main(string[] args)
     {
@@ -122,7 +123,7 @@ class GithubDL
 
 
                 var commitMsg = cells[1].SelectSingleNode(".//span/a");
-                if (commitMsg != null) item.LastCommitInfo = commitMsg.GetAttributeValue("title", "not find").Split('\n')[0];
+                if (commitMsg != null) item.LastCommitInfo = HttpUtility.HtmlDecode(commitMsg.GetAttributeValue("title", "not find").Split('\n')[0]);
 
                 var time = cells[2].SelectSingleNode(".//time-ago");
                 string t = cells[2].InnerText.Trim();
@@ -140,7 +141,7 @@ class GithubDL
 
     static void ListDirectory(List<RowItem> itemList)
     {
-        bool withDetails = ((WhatToDoMask & 0x0F) == 0x0F) ? true : false;
+        bool withDetails = ((WhatToDoMask & 0x0F) == 0x0F);
 
         int index = 0;
         int indexPadding = itemList.Count.ToString().Length;
@@ -150,7 +151,7 @@ class GithubDL
         sb.Append("\n\t");
         sb.AppendLine(RepositoryUrl);
         sb.AppendLine();
-        foreach (RowItem item in itemList)
+        foreach (var item in itemList)
         {
             sb.Append('[');
             sb.Append($"{index}".PadLeft(indexPadding, ' '));
@@ -164,7 +165,7 @@ class GithubDL
             index++;
         }
         if ((WhatToDoMask & 0xF0) != 0xF0)
-            sb.AppendLine("\nInput the file indices and saving path to download:");
+            sb.AppendLine("\nInput the file indices to download and path to save, q/Enter to quit:");
 
         Console.WriteLine(sb.ToString());
     }
@@ -180,7 +181,8 @@ class GithubDL
                 return;
             }
             else input = Console.ReadLine();
-
+            if (input.Equals("q") || input.Equals("")) return;
+            
             var indexAndPath = input.Replace('\\', '/').Split(' ', StringSplitOptions.RemoveEmptyEntries);
             List<int> fileIndices = new();
 
